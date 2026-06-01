@@ -1,6 +1,6 @@
 {
   "name": "repo-to-agents",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Deterministic repository inspector that generates AI coding-agent instructions.",
   "license": "MIT",
   "author": "Michael Ko",

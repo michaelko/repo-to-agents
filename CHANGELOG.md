@@ -4,6 +4,12 @@ All notable changes to this project will be documented in this file.
 
 The format is based on Keep a Changelog, and this project adheres to semantic versioning.
 
+## [0.1.1] - 2026-06-01
+
+### Added
+
+- Python and Go fixture coverage for detector and generated command behavior.
+
 ## [0.1.0] - 2026-06-01
 
 ### Added

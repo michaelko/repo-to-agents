@@ -6,6 +6,8 @@ import { inspectRepository } from "../src/inspector";
 import { GENERATED_MARKER } from "../src/types";
 
 const fixtureRoot = path.resolve(__dirname, "..", "..", "test", "fixtures", "node-app");
+const pythonFixtureRoot = path.resolve(__dirname, "..", "..", "test", "fixtures", "python-api");
+const goFixtureRoot = path.resolve(__dirname, "..", "..", "test", "fixtures", "go-cli");
 
 describe("generateAgents", () => {
   it("creates deterministic agent guidance with expected sections and commands", async () => {
@@ -23,5 +25,24 @@ describe("generateAgents", () => {
     assert.ok(first.includes("`pnpm install`"));
     assert.ok(first.includes("`pnpm test`"));
     assert.ok(first.includes("`.github/workflows/ci.yml`"));
+  });
+
+  it("generates useful commands for Python repositories", async () => {
+    const facts = await inspectRepository(pythonFixtureRoot);
+    const output = generateAgents(facts);
+
+    assert.ok(output.includes("Python project: fixture-python-api"));
+    assert.ok(output.includes("`python -m pip install -r requirements.txt`"));
+    assert.ok(output.includes("`pytest`"));
+  });
+
+  it("generates useful commands for Go repositories", async () => {
+    const facts = await inspectRepository(goFixtureRoot);
+    const output = generateAgents(facts);
+
+    assert.ok(output.includes("Go module: example.com/fixture-go-cli"));
+    assert.ok(output.includes("`go test ./...`"));
+    assert.ok(output.includes("`cmd/`: command entry points"));
+    assert.ok(output.includes("`internal/`: private implementation packages"));
   });
 });
