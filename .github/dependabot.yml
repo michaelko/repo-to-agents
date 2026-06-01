@@ -4,8 +4,25 @@ updates:
     directory: /
     schedule:
       interval: weekly
+    groups:
+      dev-tooling:
+        patterns:
+          - "@types/node"
+          - "typescript"
+        update-types:
+          - minor
+          - patch
+    ignore:
+      - dependency-name: "@types/node"
+        update-types: ["version-update:semver-major"]
+      - dependency-name: "typescript"
+        update-types: ["version-update:semver-major"]
     open-pull-requests-limit: 5
   - package-ecosystem: github-actions
     directory: /
     schedule:
       interval: weekly
+    groups:
+      github-actions:
+        patterns:
+          - "*"
