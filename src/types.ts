@@ -18,6 +18,19 @@ export interface PackageJsonFacts {
   dependencies: string[];
 }
 
+export interface WorkspacePackageFacts {
+  path: string;
+  name?: string;
+  private?: boolean;
+}
+
+export interface WorkspaceFacts {
+  manager: "npm" | "pnpm" | "yarn";
+  source: string;
+  patterns: string[];
+  packages: WorkspacePackageFacts[];
+}
+
 export interface PythonFacts {
   projectName?: string;
   manager?: "uv" | "poetry" | "pdm" | "pip";
@@ -59,6 +72,7 @@ export interface RepoFacts {
   name: string;
   readme?: ReadmeFacts;
   packageJson?: PackageJsonFacts;
+  workspaces?: WorkspaceFacts;
   python?: PythonFacts;
   go?: GoFacts;
   rust?: RustFacts;

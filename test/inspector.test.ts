@@ -6,6 +6,7 @@ import { inspectRepository } from "../src/inspector";
 const fixtureRoot = path.resolve(__dirname, "..", "..", "test", "fixtures", "node-app");
 const pythonFixtureRoot = path.resolve(__dirname, "..", "..", "test", "fixtures", "python-api");
 const goFixtureRoot = path.resolve(__dirname, "..", "..", "test", "fixtures", "go-cli");
+const workspaceFixtureRoot = path.resolve(__dirname, "..", "..", "test", "fixtures", "workspace-repo");
 
 describe("inspectRepository", () => {
   it("detects Node, TypeScript, test, Docker, Makefile, and CI facts", async () => {
@@ -49,5 +50,21 @@ describe("inspectRepository", () => {
     assert.ok(facts.testConfigs.includes("go.mod"));
     assert.ok(facts.directories.some((entry) => entry.path === "cmd"));
     assert.ok(facts.directories.some((entry) => entry.path === "internal"));
+  });
+
+  it("detects package workspaces and package names", async () => {
+    const facts = await inspectRepository(workspaceFixtureRoot);
+
+    assert.equal(facts.name, "fixture-workspace");
+    assert.equal(facts.workspaces?.manager, "pnpm");
+    assert.equal(facts.workspaces?.source, "package.json workspaces");
+    assert.deepEqual(facts.workspaces?.patterns, ["apps/*", "packages/*"]);
+    assert.deepEqual(
+      facts.workspaces?.packages.map((workspacePackage) => [workspacePackage.path, workspacePackage.name]),
+      [
+        ["apps/web", "@fixture/web"],
+        ["packages/ui", "@fixture/ui"]
+      ]
+    );
   });
 });

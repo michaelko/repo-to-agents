@@ -8,6 +8,7 @@ import { GENERATED_MARKER } from "../src/types";
 const fixtureRoot = path.resolve(__dirname, "..", "..", "test", "fixtures", "node-app");
 const pythonFixtureRoot = path.resolve(__dirname, "..", "..", "test", "fixtures", "python-api");
 const goFixtureRoot = path.resolve(__dirname, "..", "..", "test", "fixtures", "go-cli");
+const workspaceFixtureRoot = path.resolve(__dirname, "..", "..", "test", "fixtures", "workspace-repo");
 
 describe("generateAgents", () => {
   it("creates deterministic agent guidance with expected sections and commands", async () => {
@@ -44,5 +45,14 @@ describe("generateAgents", () => {
     assert.ok(output.includes("`go test ./...`"));
     assert.ok(output.includes("`cmd/`: command entry points"));
     assert.ok(output.includes("`internal/`: private implementation packages"));
+  });
+
+  it("includes workspace package names in generated architecture maps", async () => {
+    const facts = await inspectRepository(workspaceFixtureRoot);
+    const output = generateAgents(facts);
+
+    assert.ok(output.includes("Workspaces: pnpm via package.json workspaces"));
+    assert.ok(output.includes("`apps/web/`: workspace application; package name `@fixture/web`."));
+    assert.ok(output.includes("`packages/ui/`: workspace package; package name `@fixture/ui`."));
   });
 });

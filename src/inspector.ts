@@ -10,7 +10,8 @@ import type {
   PythonFacts,
   ReadmeFacts,
   RepoFacts,
-  RustFacts
+  RustFacts,
+  WorkspaceFacts
 } from "./types";
 
 const SKIP_DIRS = new Set([
@@ -62,6 +63,7 @@ const CONFIG_CANDIDATES = [
   "compose.yml",
   "docker-compose.yaml",
   "docker-compose.yml",
+  "pnpm-workspace.yaml",
   "tsconfig.json",
   ".eslintrc",
   ".eslintrc.json",
@@ -97,6 +99,7 @@ export async function inspectRepository(repoPath: string = process.cwd()): Promi
   const rootName = path.basename(root);
 
   const packageJson = await inspectPackageJson(root, fileSet);
+  const workspaces = await inspectWorkspaces(root, fileSet, packageJson?.packageManager);
   const python = await inspectPython(root, fileSet);
   const go = await inspectGo(root, fileSet);
   const rust = await inspectRust(root, fileSet);
@@ -115,6 +118,7 @@ export async function inspectRepository(repoPath: string = process.cwd()): Promi
     name: packageJson?.name ?? python?.projectName ?? rust?.packageName ?? rootName,
     readme,
     packageJson,
+    workspaces,
     python,
     go,
     rust,
@@ -156,6 +160,226 @@ async function inspectPackageJson(
     scripts,
     dependencies: [...dependencies].sort()
   };
+}
+
+async function inspectWorkspaces(
+  root: string,
+  fileSet: Set<string>,
+  packageManager: PackageManagerFacts | undefined
+): Promise<WorkspaceFacts | undefined> {
+  const patterns = new Set<string>();
+  const sources = new Set<string>();
+
+  if (fileSet.has("package.json")) {
+    const packageJson = await readJson(path.join(root, "package.json"));
+    const packageJsonPatterns = workspacePatternsFromPackageJson(packageJson);
+    if (packageJsonPatterns.length > 0) {
+      sources.add("package.json workspaces");
+      for (const pattern of packageJsonPatterns) {
+        patterns.add(pattern);
+      }
+    }
+  }
+
+  if (fileSet.has("pnpm-workspace.yaml")) {
+    const pnpmWorkspace = await readText(path.join(root, "pnpm-workspace.yaml"));
+    const pnpmPatterns = workspacePatternsFromPnpmWorkspace(pnpmWorkspace);
+    if (pnpmPatterns.length > 0) {
+      sources.add("pnpm-workspace.yaml");
+      for (const pattern of pnpmPatterns) {
+        patterns.add(pattern);
+      }
+    }
+  }
+
+  if (patterns.size === 0) {
+    return undefined;
+  }
+
+  const includePatterns = [...patterns].filter((pattern) => !pattern.startsWith("!"));
+  const excludePatterns = [...patterns].filter((pattern) => pattern.startsWith("!")).map((pattern) => pattern.slice(1));
+  const includeDirs = await expandWorkspacePatterns(root, includePatterns);
+  const excludeDirs = new Set(await expandWorkspacePatterns(root, excludePatterns));
+  const packages: WorkspaceFacts["packages"] = [];
+
+  for (const relativePath of includeDirs.filter((entry) => !excludeDirs.has(entry)).sort()) {
+    const packageJson = await readJson(path.join(root, relativePath, "package.json"));
+    packages.push({
+      path: relativePath,
+      name: typeof packageJson?.name === "string" ? packageJson.name : undefined,
+      private: typeof packageJson?.private === "boolean" ? packageJson.private : undefined
+    });
+  }
+
+  return {
+    manager: workspaceManager(packageManager, fileSet),
+    source: [...sources].sort().join(", "),
+    patterns: [...patterns].sort(),
+    packages
+  };
+}
+
+function workspacePatternsFromPackageJson(packageJson: Record<string, unknown> | undefined): string[] {
+  const workspaces = packageJson?.workspaces;
+  if (Array.isArray(workspaces)) {
+    return normalizeWorkspacePatterns(workspaces);
+  }
+  if (workspaces && typeof workspaces === "object" && !Array.isArray(workspaces)) {
+    return normalizeWorkspacePatterns((workspaces as Record<string, unknown>).packages);
+  }
+  return [];
+}
+
+function workspacePatternsFromPnpmWorkspace(content: string): string[] {
+  const patterns: string[] = [];
+  let inPackages = false;
+  let packagesIndent = 0;
+
+  for (const line of content.split(/\r?\n/)) {
+    const trimmed = line.trim();
+    if (!trimmed || trimmed.startsWith("#")) {
+      continue;
+    }
+
+    const packagesMatch = /^(\s*)packages\s*:\s*(.*)$/.exec(line);
+    if (packagesMatch) {
+      inPackages = true;
+      packagesIndent = packagesMatch[1].length;
+      patterns.push(...inlineYamlList(packagesMatch[2]));
+      continue;
+    }
+
+    if (!inPackages) {
+      continue;
+    }
+
+    const indent = line.match(/^\s*/)?.[0].length ?? 0;
+    if (indent <= packagesIndent && /^[A-Za-z0-9_-]+\s*:/.test(trimmed)) {
+      inPackages = false;
+      continue;
+    }
+
+    const item = /^\s*-\s*(.+?)\s*(?:#.*)?$/.exec(line)?.[1];
+    if (item) {
+      patterns.push(unquote(item));
+    }
+  }
+
+  return normalizeWorkspacePatterns(patterns);
+}
+
+function inlineYamlList(value: string | undefined): string[] {
+  const trimmed = value?.trim();
+  if (!trimmed || !trimmed.startsWith("[") || !trimmed.endsWith("]")) {
+    return [];
+  }
+  return trimmed
+    .slice(1, -1)
+    .split(",")
+    .map((item) => unquote(item.trim()));
+}
+
+function normalizeWorkspacePatterns(value: unknown): string[] {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+  return value
+    .filter((pattern): pattern is string => typeof pattern === "string")
+    .map((pattern) => pattern.trim().replace(/\/+$/, ""))
+    .filter(Boolean);
+}
+
+async function expandWorkspacePatterns(root: string, patterns: string[]): Promise<string[]> {
+  const directories = new Set<string>();
+
+  for (const pattern of patterns) {
+    await expandPatternSegments(root, pattern.split("/").filter(Boolean), "", directories);
+  }
+
+  return [...directories].sort();
+}
+
+async function expandPatternSegments(
+  root: string,
+  segments: string[],
+  relativePath: string,
+  directories: Set<string>
+): Promise<void> {
+  if (segments.length === 0) {
+    if (await isPackageDirectory(path.join(root, relativePath))) {
+      directories.add(toPosix(relativePath));
+    }
+    return;
+  }
+
+  const [segment, ...rest] = segments;
+  const absolutePath = path.join(root, relativePath);
+
+  if (segment === "**") {
+    await collectWorkspacePackageDirs(absolutePath, relativePath, directories);
+    return;
+  }
+
+  if (segment === "*") {
+    const entries = await safeReaddir(absolutePath);
+    for (const entry of entries) {
+      if (entry.isDirectory() && !entry.name.startsWith(".")) {
+        await expandPatternSegments(root, rest, path.join(relativePath, entry.name), directories);
+      }
+    }
+    return;
+  }
+
+  await expandPatternSegments(root, rest, path.join(relativePath, segment), directories);
+}
+
+async function collectWorkspacePackageDirs(
+  absolutePath: string,
+  relativePath: string,
+  directories: Set<string>,
+  depth = 0
+): Promise<void> {
+  if (depth > 5 || SKIP_DIRS.has(path.basename(absolutePath))) {
+    return;
+  }
+  if (await isPackageDirectory(absolutePath)) {
+    directories.add(toPosix(relativePath));
+  }
+
+  const entries = await safeReaddir(absolutePath);
+  for (const entry of entries) {
+    if (entry.isDirectory() && !entry.name.startsWith(".") && !SKIP_DIRS.has(entry.name)) {
+      await collectWorkspacePackageDirs(path.join(absolutePath, entry.name), path.join(relativePath, entry.name), directories, depth + 1);
+    }
+  }
+}
+
+async function isPackageDirectory(directoryPath: string): Promise<boolean> {
+  try {
+    return (await fs.stat(path.join(directoryPath, "package.json"))).isFile();
+  } catch {
+    return false;
+  }
+}
+
+function workspaceManager(
+  packageManager: PackageManagerFacts | undefined,
+  fileSet: Set<string>
+): WorkspaceFacts["manager"] {
+  if (packageManager?.name === "pnpm" || packageManager?.name === "yarn" || packageManager?.name === "npm") {
+    return packageManager.name;
+  }
+  if (fileSet.has("pnpm-workspace.yaml")) {
+    return "pnpm";
+  }
+  if (fileSet.has("yarn.lock")) {
+    return "yarn";
+  }
+  return "npm";
+}
+
+function unquote(value: string): string {
+  return value.trim().replace(/^['"]|['"]$/g, "");
 }
 
 async function inspectPython(root: string, fileSet: Set<string>): Promise<PythonFacts | undefined> {
