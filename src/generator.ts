@@ -203,6 +203,16 @@ function detectedStackBullets(facts: RepoFacts): string[] {
       )}.`
     );
   }
+  if (facts.workspaces) {
+    const packageNames = facts.workspaces.packages
+      .map((workspacePackage) => workspacePackage.name)
+      .filter((name): name is string => Boolean(name));
+    bullets.push(
+      `- Workspaces: ${facts.workspaces.manager} via ${facts.workspaces.source}; packages: ${formatList(
+        packageNames.length > 0 ? packageNames : facts.workspaces.packages.map((workspacePackage) => workspacePackage.path)
+      )}.`
+    );
+  }
   return bullets;
 }
 
@@ -230,10 +240,27 @@ function commandBullets(facts: RepoFacts): string[] {
 }
 
 function architectureBullets(facts: RepoFacts): string[] {
-  if (facts.directories.length === 0) {
+  if (facts.directories.length === 0 && !facts.workspaces?.packages.length) {
     return ["- No common source directories were detected at the repository root."];
   }
-  return facts.directories.map((entry) => `- \`${entry.path}/\`: ${entry.purpose}.`);
+
+  const workspacePackages = new Map((facts.workspaces?.packages ?? []).map((workspacePackage) => [workspacePackage.path, workspacePackage]));
+  const seenPaths = new Set<string>();
+  const bullets = facts.directories.map((entry) => {
+    seenPaths.add(entry.path);
+    const workspacePackage = workspacePackages.get(entry.path);
+    const packageName = workspacePackage?.name ? `; package name \`${workspacePackage.name}\`` : "";
+    return `- \`${entry.path}/\`: ${entry.purpose}${packageName}.`;
+  });
+
+  for (const workspacePackage of facts.workspaces?.packages ?? []) {
+    if (!seenPaths.has(workspacePackage.path)) {
+      const packageName = workspacePackage.name ? `; package name \`${workspacePackage.name}\`` : "";
+      bullets.push(`- \`${workspacePackage.path}/\`: workspace package${packageName}.`);
+    }
+  }
+
+  return bullets;
 }
 
 function codingConventionBullets(facts: RepoFacts): string[] {
