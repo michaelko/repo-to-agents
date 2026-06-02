@@ -316,7 +316,13 @@ async function expandPatternSegments(
   const absolutePath = path.join(root, relativePath);
 
   if (segment === "**") {
-    await collectWorkspacePackageDirs(absolutePath, relativePath, directories);
+    await expandPatternSegments(root, rest, relativePath, directories);
+    const entries = await safeReaddir(absolutePath);
+    for (const entry of entries) {
+      if (entry.isDirectory() && !entry.name.startsWith(".") && !SKIP_DIRS.has(entry.name)) {
+        await expandPatternSegments(root, segments, path.join(relativePath, entry.name), directories);
+      }
+    }
     return;
   }
 
@@ -331,27 +337,6 @@ async function expandPatternSegments(
   }
 
   await expandPatternSegments(root, rest, path.join(relativePath, segment), directories);
-}
-
-async function collectWorkspacePackageDirs(
-  absolutePath: string,
-  relativePath: string,
-  directories: Set<string>,
-  depth = 0
-): Promise<void> {
-  if (depth > 5 || SKIP_DIRS.has(path.basename(absolutePath))) {
-    return;
-  }
-  if (await isPackageDirectory(absolutePath)) {
-    directories.add(toPosix(relativePath));
-  }
-
-  const entries = await safeReaddir(absolutePath);
-  for (const entry of entries) {
-    if (entry.isDirectory() && !entry.name.startsWith(".") && !SKIP_DIRS.has(entry.name)) {
-      await collectWorkspacePackageDirs(path.join(absolutePath, entry.name), path.join(relativePath, entry.name), directories, depth + 1);
-    }
-  }
 }
 
 async function isPackageDirectory(directoryPath: string): Promise<boolean> {

@@ -1,4 +1,6 @@
 import assert from "node:assert/strict";
+import { mkdir, mkdtemp, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
 import path from "node:path";
 import { describe, it } from "node:test";
 import { inspectRepository } from "../src/inspector";
@@ -63,6 +65,36 @@ describe("inspectRepository", () => {
       facts.workspaces?.packages.map((workspacePackage) => [workspacePackage.path, workspacePackage.name]),
       [
         ["apps/web", "@fixture/web"],
+        ["packages/ui", "@fixture/ui"]
+      ]
+    );
+  });
+
+  it("applies double-star workspace exclusions without excluding unrelated packages", async () => {
+    const root = await mkdtemp(path.join(tmpdir(), "repo-to-agents-workspaces-"));
+    await mkdir(path.join(root, "packages", "app", "test", "fixture"), { recursive: true });
+    await mkdir(path.join(root, "packages", "ui"), { recursive: true });
+    await writeFile(
+      path.join(root, "package.json"),
+      JSON.stringify({ name: "fixture-pnpm", packageManager: "pnpm@9.1.0" })
+    );
+    await writeFile(
+      path.join(root, "pnpm-workspace.yaml"),
+      "packages:\n  - 'packages/**'\n  - '!**/test/**'\n"
+    );
+    await writeFile(path.join(root, "packages", "app", "package.json"), JSON.stringify({ name: "@fixture/app" }));
+    await writeFile(path.join(root, "packages", "ui", "package.json"), JSON.stringify({ name: "@fixture/ui" }));
+    await writeFile(
+      path.join(root, "packages", "app", "test", "fixture", "package.json"),
+      JSON.stringify({ name: "@fixture/test-helper" })
+    );
+
+    const facts = await inspectRepository(root);
+
+    assert.deepEqual(
+      facts.workspaces?.packages.map((workspacePackage) => [workspacePackage.path, workspacePackage.name]),
+      [
+        ["packages/app", "@fixture/app"],
         ["packages/ui", "@fixture/ui"]
       ]
     );
